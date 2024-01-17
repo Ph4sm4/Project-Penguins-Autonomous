@@ -9,6 +9,7 @@ enum ExceptionHandler
     GamePhaseValueException = 3,
     FileFormatException = 4,
     FileOpenException = 5,
+    MoveImpossible = 6,
 } globalExceptionHandler;
 
 #endif

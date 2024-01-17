@@ -1,4 +1,4 @@
-#include "GameSystem.h"
+#include "./GameSystem.h"
 #include "stdio.h"
 #include "string.h"
 #include "Windows.h"
@@ -11,16 +11,24 @@
 // available public functions:
 
 enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[]);
-void askForAction(struct GameSystem *game);
+enum ExceptionHandler performAction(struct GameSystem *game);
 void exitWithErrorMessage(enum ExceptionHandler error);
 
 // private functions:
 
-// Function to place a penguin on the grid
-void moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination);
-
 // Function to move a penguin from an initial point to a destination point
-void placeAPenguin(struct GameGrid *gameGrid, struct GameSystem *game);
+enum ExceptionHandler moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination);
+
+// Function to place a penguin on the grid
+enum ExceptionHandler placeAPenguin(struct GameGrid *gameGrid, struct GameSystem *game);
+
+// find a perfect placement point, e.g. 10 30 (the point returned will be the first one)
+struct GridPoint *findPerfectPointToPlaceRowWise(struct GameGrid *gameGrid);
+
+// find second best e.g. if there are no 'perfect' points available, then choose such a point which
+// is in the same row as the point with the highest possible fish number and at the same time it has
+// no obstacles between the initial point and the highest one
+struct GridPoint *findSecondBestPointToPlaceRowWise(struct GameGrid *gameGrid);
 
 // =========================================
 
@@ -29,14 +37,22 @@ createGameSystemObject()
 {
     struct GameSystem obj;
     // setting all of the objects
-    obj.gameGrid = createGameGridObject();
     obj.phase = (enum GameState)Unset;
+    obj.maxNumberOfPlayers = 9;
+    obj.numberOfPlayers = 0;
+
+    obj.fullPlayersData = (char **)malloc(obj.maxNumberOfPlayers * sizeof(char *)); // allocate memory for max players
+    for (int i = 0; i < obj.maxNumberOfPlayers; i++)
+    {
+        obj.fullPlayersData[i] = (char *)malloc(1000 * sizeof(char)); // max length of a 1000 characters for a single player data line
+        // e.g. the nickname, id and score
+    }
 
     obj.myPlayer = createPlayerObject();
 
     // setting function references
     obj.setup = &setup;
-    obj.askForAction = &askForAction;
+    obj.performAction = &performAction;
     obj.exitWithErrorMessage = &exitWithErrorMessage;
 
     obj.numberOfPenguins = -1;
@@ -75,6 +91,11 @@ void exitWithErrorMessage(enum ExceptionHandler error)
         MessageBox(NULL, "Error while opening the file. Please provide a valid path (relative to the .exe file)", "Error", MB_ICONWARNING);
         exit(3);
     }
+    case MoveImpossible:
+    {
+        MessageBox(NULL, "Impossible to make a move for current phase", "Error", MB_ICONWARNING);
+        exit(3);
+    }
     }
 }
 
@@ -86,9 +107,6 @@ enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[])
     // 2) phase=movement inputboard.xt outputboard.txt
     // or at last:
     // name -> program returns the name of our player
-
-    struct GameGrid grid = createGameGridObject();
-    game->gameGrid = grid;
 
     for (int i = 0; i < argc; i++)
     {
@@ -129,10 +147,11 @@ enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[])
             return (enum ExceptionHandler)FileFormatException;
         }
 
-        game->gameGrid.inputFile = argv[3];
-        game->gameGrid.outputFile = argv[4];
+        game->gameGrid->inputFile = argv[3];
+        game->gameGrid->outputFile = argv[4];
 
-        enum ExceptionHandler readStatus = game->gameGrid.readGridData(&game->myPlayer, &game->gameGrid);
+        enum ExceptionHandler readStatus = game->gameGrid->readGridData(&game->myPlayer, game->gameGrid);
+
         if (readStatus != NoError)
             return readStatus;
 
@@ -168,16 +187,13 @@ enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[])
     return (enum ExceptionHandler)NoError;
 }
 
-void askForAction(struct GameSystem *game)
+enum ExceptionHandler performAction(struct GameSystem *game)
 {
     switch (game->phase)
     {
     case (enum GameState)PlacingPhase:
     {
-
-        placeAPenguin(&game->gameGrid, game);
-
-        break;
+        return placeAPenguin(game->gameGrid, game);
     }
     case (enum GameState)MovementPhase:
     {
@@ -187,37 +203,152 @@ void askForAction(struct GameSystem *game)
         if (game->myPlayer.blockedPenguins == game->numberOfPenguins)
         {
             // return an appropriate error code - the program is unable to make a move
-            return;
+            return (enum ExceptionHandler)MoveImpossible;
         }
 
         struct GridPoint *initialPoint = NULL;
-        if (initialPoint == NULL)
-            return;
 
         initialPoint->selected = true;
 
         struct GridPoint *destination;
 
-        moveAPenguin(game, initialPoint, destination);
-
-        break;
+        return moveAPenguin(game, initialPoint, destination);
     }
     }
 }
 
-void placeAPenguin(struct GameGrid *gameGrid, struct GameSystem *game)
+enum ExceptionHandler placeAPenguin(struct GameGrid *gameGrid, struct GameSystem *game)
 {
-    // point->owner = getCurrentPlayer(game);
-    // point->removed = true;
-    // strcpy(point->label, game->playerTurn == 0 ? "P1" : "P2");
+    const struct Player *ourPlayer = &game->myPlayer;
+
+    int x, y;
+
+    struct GridPoint *p = findPerfectPointToPlaceRowWise(gameGrid);
+    if (p == NULL)
+    {
+        printf("\nperfect nulled");
+        p = findSecondBestPointToPlaceRowWise(gameGrid);
+    }
+    if (p == NULL)
+    {
+        return (enum ExceptionHandler)MoveImpossible;
+    }
+    printf("\npoint chosen: %d %d %d", p->x, p->y, p->numberOfFishes);
+
+    p->owner = &game->myPlayer;
+    p->numberOfFishes = 0;
+    game->myPlayer.collectedFishes++;
+
+    return game->gameGrid->writeGridData(&game->myPlayer, game->gameGrid);
 }
 
-void moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination)
+struct GridPoint *findPerfectPointToPlaceRowWise(struct GameGrid *gameGrid)
+{
+    // perfect means that we have found two adjecent cells where one of which is a 10 and the second one is 30
+    // (a perfect place)
+
+    // first left-right: 10 30
+    for (int i = 0; i < gameGrid->rows; i++)
+    {
+        for (int j = 0; j < gameGrid->cols - 1; j++)
+        {
+            // printf("\nconsidering: %d %d %d and %d %d %d", i, j, gameGrid->grid[i][j].numberOfFishes, i, j + 1, gameGrid->grid[i][j + 1].numberOfFishes);
+            if (gameGrid->grid[i][j].numberOfFishes == 1 && gameGrid->grid[i][j + 1].numberOfFishes == 3)
+            {
+                return &gameGrid->grid[i][j];
+            }
+        }
+    }
+
+    // secondly right-left: 30 10
+    for (int i = 0; i < gameGrid->rows; i++)
+    {
+        for (int j = 1; j < gameGrid->cols; j++)
+        {
+            // printf("\nconsidering: %d %d %d and %d %d %d", i, j, gameGrid->grid[i][j].numberOfFishes, i, j + 1, gameGrid->grid[i][j + 1].numberOfFishes);
+            if (gameGrid->grid[i][j].numberOfFishes == 1 && gameGrid->grid[i][j - 1].numberOfFishes == 3)
+            {
+                return &gameGrid->grid[i][j];
+            }
+        }
+    }
+    return NULL;
+}
+
+struct GridPoint *findSecondBestPointToPlaceRowWise(struct GameGrid *gameGrid)
+{
+    // perfect means that we have found two adjecent cells where one of which is a 10 and the second one is 30
+    // (a perfect place)
+
+    // first left-right: 10 10 10 20
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->rows; i++)
+        {
+            for (int j = 0; j < gameGrid->cols; j++)
+            {
+                if (gameGrid->grid[i][j].numberOfFishes != 1)
+                    continue;
+                for (int k = j + 1; k < gameGrid->cols; k++)
+                {
+                    // we cannot allow any untraversable points to be in between
+                    if (gameGrid->grid[i][k].owner != NULL)
+                        break;
+                    // this is the situation in terms of a row: 00 10 10 10 30
+                    // then the second from left point is gonna get returned
+                    if (gameGrid->grid[i][k].numberOfFishes == fishNumber)
+                    {
+                        return &gameGrid->grid[i][j];
+                    }
+                }
+            }
+        }
+    }
+    // secondly right-left: 20 10 10 10
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->rows; i++)
+        {
+            for (int j = gameGrid->cols - 1; j >= 0; j--)
+            {
+                if (gameGrid->grid[i][j].numberOfFishes != 1)
+                    continue;
+                for (int k = j - 1; k >= 0; k--)
+                {
+                    // we cannot allow any untraversable points to be in between
+                    if (gameGrid->grid[i][k].owner != NULL)
+                        break;
+                    // this is the situation in terms of a row: 00 10 10 10 30
+                    // then the second from left point is gonna get returned
+                    if (gameGrid->grid[i][k].numberOfFishes == fishNumber)
+                    {
+                        return &gameGrid->grid[i][j];
+                    }
+                }
+            }
+        }
+    }
+
+    // if all of them fail, just pick first 10 in the grid
+    for (int i = 0; i < gameGrid->rows; i++)
+    {
+        for (int j = 0; j < gameGrid->cols; j++)
+        {
+            if (gameGrid->grid[i][j].numberOfFishes == 1)
+                return &gameGrid->grid[i][j];
+        }
+    }
+
+    // no available placement tile
+    return NULL;
+}
+
+enum ExceptionHandler moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination)
 {
     initialPoint->removed = true;
     initialPoint->owner = NULL;
 
     // strcpy(destination->label, game->playerTurn == 0 ? "P1" : "P2");
 
-    game->gameGrid.checkForBlockedPenguins(&game->gameGrid);
+    game->gameGrid->checkForBlockedPenguins(game->gameGrid);
 }
