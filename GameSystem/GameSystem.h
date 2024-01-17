@@ -13,6 +13,7 @@ struct GameSystem
     struct Player myPlayer;
 
     int numberOfPenguins;
+    int numberOfPlacedPenguins;
 
     enum GameState phase;
 

@@ -17,7 +17,7 @@ void exitWithErrorMessage(enum ExceptionHandler error);
 // private functions:
 
 // Function to move a penguin from an initial point to a destination point
-enum ExceptionHandler moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination);
+enum ExceptionHandler moveAPenguin(struct GameGrid *gameGrid, struct GameSystem *game);
 
 // Function to place a penguin on the grid
 enum ExceptionHandler placeAPenguin(struct GameGrid *gameGrid, struct GameSystem *game);
@@ -29,6 +29,14 @@ struct GridPoint *findPerfectPointToPlaceRowWise(struct GameGrid *gameGrid);
 // is in the same row as the point with the highest possible fish number and at the same time it has
 // no obstacles between the initial point and the highest one
 struct GridPoint *findSecondBestPointToPlaceRowWise(struct GameGrid *gameGrid);
+
+struct GridPoint *findBestPointToMoveRowWise(struct GameGrid *gameGrid);
+
+struct GridPoint *findBestPointToMoveColWise(struct GameGrid *gameGrid);
+
+bool isTileNotTraversable(struct GameGrid *gameGrid, struct GridPoint x);
+
+bool isTileOurs(struct GameGrid *gameGrid, struct GridPoint x);
 
 // =========================================
 
@@ -55,7 +63,8 @@ createGameSystemObject()
     obj.performAction = &performAction;
     obj.exitWithErrorMessage = &exitWithErrorMessage;
 
-    obj.numberOfPenguins = -1;
+    obj.numberOfPenguins = -1; // this will be written into after reading the cmd params
+    obj.numberOfPlacedPenguins = 0;
 
     return obj;
 }
@@ -152,14 +161,42 @@ enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[])
 
         enum ExceptionHandler readStatus = game->gameGrid->readGridData(&game->myPlayer, game->gameGrid);
 
-        if (readStatus != NoError)
-            return readStatus;
+        if (game->numberOfPlacedPenguins >= game->numberOfPenguins)
+        {
+            return (enum ExceptionHandler)MoveImpossible;
+        }
 
-        break;
+        return readStatus;
     }
     case 4:
     {
-        break;
+        // placement phase
+
+        if (strncmp(argv[1], "phase=", 6))
+            return (enum ExceptionHandler)UnknownParamsException;
+
+        char *gamePhase = malloc(100 * sizeof(char));
+
+        if (sscanf(argv[1], "phase=%s", gamePhase) == 0 || strcmp(gamePhase, "movement"))
+            return (enum ExceptionHandler)GamePhaseValueException;
+
+        game->phase = (enum GameState)MovementPhase;
+
+        const char *suffix = ".txt";
+        size_t suffixLength = strlen(suffix);
+        size_t inputLen = strlen(argv[2]); // lengths of file names
+        size_t outputLen = strlen(argv[3]);
+
+        if (inputLen >= suffixLength && strcmp(argv[2] + (inputLen - suffixLength), suffix) != 0 ||
+            outputLen >= suffixLength && strcmp(argv[3] + (outputLen - suffixLength), suffix) != 0)
+        {
+            return (enum ExceptionHandler)FileFormatException;
+        }
+
+        game->gameGrid->inputFile = argv[2];
+        game->gameGrid->outputFile = argv[3];
+
+        return (enum ExceptionHandler)game->gameGrid->readGridData(&game->myPlayer, game->gameGrid);
     }
     case 2:
     {
@@ -197,22 +234,7 @@ enum ExceptionHandler performAction(struct GameSystem *game)
     }
     case (enum GameState)MovementPhase:
     {
-        int penguinX, penguinY;
-        int toX, toY; // move to
-
-        if (game->myPlayer.blockedPenguins == game->numberOfPenguins)
-        {
-            // return an appropriate error code - the program is unable to make a move
-            return (enum ExceptionHandler)MoveImpossible;
-        }
-
-        struct GridPoint *initialPoint = NULL;
-
-        initialPoint->selected = true;
-
-        struct GridPoint *destination;
-
-        return moveAPenguin(game, initialPoint, destination);
+        return moveAPenguin(game->gameGrid, game);
     }
     }
 }
@@ -239,7 +261,7 @@ enum ExceptionHandler placeAPenguin(struct GameGrid *gameGrid, struct GameSystem
     p->numberOfFishes = 0;
     game->myPlayer.collectedFishes++;
 
-    return game->gameGrid->writeGridData(&game->myPlayer, game->gameGrid);
+    return (enum ExceptionHandler)game->gameGrid->writeGridData(&game->myPlayer, game->gameGrid);
 }
 
 struct GridPoint *findPerfectPointToPlaceRowWise(struct GameGrid *gameGrid)
@@ -343,12 +365,176 @@ struct GridPoint *findSecondBestPointToPlaceRowWise(struct GameGrid *gameGrid)
     return NULL;
 }
 
-enum ExceptionHandler moveAPenguin(struct GameSystem *game, struct GridPoint *initialPoint, struct GridPoint *destination)
+enum ExceptionHandler moveAPenguin(struct GameGrid *gameGrid, struct GameSystem *game)
 {
-    initialPoint->removed = true;
+    struct GridPoint *p1 = findBestPointToMoveRowWise(gameGrid);
+    struct GridPoint *p2 = findBestPointToMoveColWise(gameGrid); // these are the destination points
+
+    if (p1 == NULL && p2 == NULL)
+        return (enum ExceptionHandler)MoveImpossible;
+
+    struct GridPoint *movePoint;
+    struct GridPoint *initialPoint;
+    if (p1 == NULL)
+    {
+        movePoint = p2;
+        initialPoint = findBestPointToMoveColWise(gameGrid);
+    }
+    else if (p2 == NULL)
+    {
+        movePoint = p1;
+        initialPoint = findBestPointToMoveRowWise(gameGrid);
+    }
+    else
+    {
+        movePoint = p1->numberOfFishes >= p2->numberOfFishes ? p1 : p2;
+        initialPoint = p1->numberOfFishes >= p2->numberOfFishes ? findBestPointToMoveRowWise(gameGrid) : findBestPointToMoveColWise(gameGrid);
+    }
+    // calling these function here once more will return the value of the static initialPoint inside them
+
+    printf("\ninitialPoint: %d %d %d", initialPoint->x, initialPoint->y, initialPoint->numberOfFishes);
+    printf("\nmovePoint: %d %d %d", movePoint->x, movePoint->y, movePoint->numberOfFishes);
+
     initialPoint->owner = NULL;
 
-    // strcpy(destination->label, game->playerTurn == 0 ? "P1" : "P2");
+    game->myPlayer.collectedFishes += movePoint->numberOfFishes;
 
-    game->gameGrid->checkForBlockedPenguins(game->gameGrid);
+    movePoint->owner = &game->myPlayer;
+    movePoint->numberOfFishes = 0;
+
+    return (enum ExceptionHandler)game->gameGrid->writeGridData(&game->myPlayer, game->gameGrid);
+}
+
+bool isTileNotTraversable(struct GameGrid *gameGrid, struct GridPoint x)
+{
+    return x.owner != &gameGrid->gameInstance->myPlayer && x.numberOfFishes == 0;
+}
+
+bool isTileOurs(struct GameGrid *gameGrid, struct GridPoint x)
+{
+    return x.owner == &gameGrid->gameInstance->myPlayer;
+}
+
+// after first call it will return the destination point,
+// second call will return the initial point
+struct GridPoint *findBestPointToMoveRowWise(struct GameGrid *gameGrid)
+{
+
+    static struct GridPoint *initialPoint = NULL;
+    if (initialPoint != NULL)
+        return initialPoint;
+
+    // looking for a point to the right
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->rows; i++)
+        {
+            for (int j = 0; j < gameGrid->cols; j++)
+            {
+                if (isTileNotTraversable(gameGrid, gameGrid->grid[i][j]) || !isTileOurs(gameGrid, gameGrid->grid[i][j]))
+                    continue;
+
+                printf("we own %d %d", gameGrid->grid[i][j].x, gameGrid->grid[i][j].y);
+
+                for (int k = j + 1; k < gameGrid->cols; k++)
+                {
+                    if (isTileNotTraversable(gameGrid, gameGrid->grid[i][k]))
+                        break;
+                    if (gameGrid->grid[i][k].numberOfFishes == fishNumber)
+                    {
+                        initialPoint = &gameGrid->grid[i][j];
+                        return &gameGrid->grid[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    // looking for a point to the left
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->rows; i++)
+        {
+            for (int j = gameGrid->cols - 1; j >= 0; j--)
+            {
+                if (isTileNotTraversable(gameGrid, gameGrid->grid[i][j]) || !isTileOurs(gameGrid, gameGrid->grid[i][j]))
+                    continue;
+
+                for (int k = j - 1; k >= 0; k--)
+                {
+                    if (isTileNotTraversable(gameGrid, gameGrid->grid[i][k]))
+                        break;
+                    if (gameGrid->grid[i][k].numberOfFishes == fishNumber)
+                    {
+                        initialPoint = &gameGrid->grid[i][j];
+                        return &gameGrid->grid[i][k];
+                    }
+                }
+            }
+        }
+    }
+
+    // no available move on the whole grid row-wise
+    return NULL;
+}
+
+// after first call it will return the destination point,
+// second call will return the initial point
+struct GridPoint *findBestPointToMoveColWise(struct GameGrid *gameGrid)
+{
+    static struct GridPoint *initialPoint = NULL;
+    if (initialPoint != NULL)
+        return initialPoint;
+
+    // looking for a point to the bottom
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->cols; i++)
+        {
+            for (int j = 0; j < gameGrid->rows; j++)
+            {
+                if (isTileNotTraversable(gameGrid, gameGrid->grid[j][i]) || !isTileOurs(gameGrid, gameGrid->grid[j][i]))
+                    continue;
+
+                for (int k = j + 1; k < gameGrid->rows; k++)
+                {
+                    if (isTileNotTraversable(gameGrid, gameGrid->grid[k][i]))
+                        break;
+                    if (gameGrid->grid[k][i].numberOfFishes == fishNumber)
+                    {
+                        initialPoint = &gameGrid->grid[j][i];
+                        return &gameGrid->grid[k][i];
+                    }
+                }
+            }
+        }
+    }
+
+    // looking for a point to the top
+    for (int fishNumber = 3; fishNumber >= 1; fishNumber--)
+    {
+        for (int i = 0; i < gameGrid->cols; i++)
+        {
+            for (int j = gameGrid->rows - 1; j >= 0; j--)
+            {
+                if (isTileNotTraversable(gameGrid, gameGrid->grid[j][i]) || !isTileOurs(gameGrid, gameGrid->grid[j][i]))
+                    continue;
+
+                for (int k = j - 1; k >= 0; k--)
+                {
+                    if (isTileNotTraversable(gameGrid, gameGrid->grid[k][i]))
+                        break;
+                    if (gameGrid->grid[k][i].numberOfFishes == fishNumber)
+                    {
+                        initialPoint = &gameGrid->grid[j][i];
+                        return &gameGrid->grid[k][i];
+                    }
+                }
+            }
+        }
+    }
+
+    // no available move on the whole grid col-wise
+
+    return NULL;
 }

@@ -14,11 +14,8 @@ struct GameGrid createGameGridObject();
 enum ExceptionHandler readGridData(struct Player *myPlayer, struct GameGrid *gameGrid);
 enum ExceptionHandler writeGridData(struct Player *myPlayer, struct GameGrid *gameGrid);
 
-void checkForBlockedPenguins(struct GameGrid *gameGrid);
-
 // private functions:
 
-bool canMoveToPoint(struct GameGrid *gameGrid, const int x, const int y);
 void initializeGrid(struct GameGrid *gameGrid);
 enum ExceptionHandler initializeMyPlayer(const struct GameGrid *gameGrid, struct Player *player);
 
@@ -28,7 +25,6 @@ struct GameGrid createGameGridObject()
 {
     struct GameGrid obj;
 
-    obj.checkForBlockedPenguins = &checkForBlockedPenguins;
     obj.readGridData = &readGridData;
     obj.writeGridData = &writeGridData;
 
@@ -116,6 +112,7 @@ enum ExceptionHandler readGridData(struct Player *myPlayer, struct GameGrid *gam
             if (field[1] - '0' == myPlayer->id)
             {
                 (*p).owner = myPlayer;
+                gameGrid->gameInstance->numberOfPlacedPenguins++;
             }
             else
             {
@@ -132,7 +129,6 @@ enum ExceptionHandler readGridData(struct Player *myPlayer, struct GameGrid *gam
                 }
             }
 
-            (*p).removed = field[0] - '0' == 0 && field[1] - '0' == 0;
             (*p).numberOfFishes = field[0] - '0';
         }
     }
@@ -218,29 +214,4 @@ void initializeGrid(struct GameGrid *gameGrid)
     {
         gameGrid->grid[i] = (struct GridPoint *)malloc(cols * sizeof(struct GridPoint));
     }
-}
-
-void checkForBlockedPenguins(struct GameGrid *gameGrid)
-{
-    for (int x = 0; x < gameGrid->rows; x++)
-    {
-        for (int y = 0; y < gameGrid->cols; y++)
-        {
-            if (gameGrid->grid[x][y].owner == NULL)
-                continue;
-
-            if (!gameGrid->grid[x][y].penguinBlocked && !(canMoveToPoint(gameGrid, x + 1, y) || canMoveToPoint(gameGrid, x - 1, y) ||
-                                                          canMoveToPoint(gameGrid, x, y + 1) ||
-                                                          canMoveToPoint(gameGrid, x, y - 1)))
-            {
-                gameGrid->grid[x][y].penguinBlocked = true;
-                gameGrid->grid[x][y].owner->blockedPenguins++;
-            }
-        }
-    }
-}
-
-bool canMoveToPoint(struct GameGrid *gameGrid, const int x, const int y)
-{
-    return gameGrid->grid[x][y].owner == NULL && gameGrid->grid[x][y].removed == false;
 }

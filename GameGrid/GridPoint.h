@@ -7,10 +7,7 @@ struct GridPoint
 {
     int x;
     int y;
-    bool removed;
     int numberOfFishes;
-    bool selected;
-    bool penguinBlocked;
 
     struct Player *owner;
 };

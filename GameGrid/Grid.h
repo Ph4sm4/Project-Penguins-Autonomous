@@ -19,9 +19,6 @@ struct GameGrid
     char *outputFile;
 
     struct GameSystem *gameInstance;
-
-    // Function to check for blocked penguins on the grid and update the blocked penguins count
-    void (*checkForBlockedPenguins)(struct GameGrid *gameGrid);
 };
 
 struct GameGrid createGameGridObject();
