@@ -1,9 +1,9 @@
 #include "./GameSystem.h"
 #include "stdio.h"
 #include "string.h"
-#include "Windows.h"
 #include "../Enums/ExceptionHandler.h"
 #include "../Enums/GameState.h"
+#include "stdlib.h"
 
 #define welcomeLine() printf("\n---- PROJECT \"PENGUINS\" ----\n\n");
 
@@ -71,38 +71,38 @@ createGameSystemObject()
 
 void exitWithErrorMessage(enum ExceptionHandler error)
 {
-    MessageBeep(MB_ICONEXCLAMATION);
+    // MessageBeep(MB_ICONEXCLAMATION);
 
     switch (error)
     {
     case UnknownParamsException:
     {
-        MessageBox(NULL, "Unsupported command line parameters", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Unsupported command line parameters", "Error", MB_ICONWARNING);
         exit(3);
     }
     case PenguinsNumValueException:
     {
-        MessageBox(NULL, "Unsupported number of penguins", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Unsupported number of penguins", "Error", MB_ICONWARNING);
         exit(3);
     }
     case GamePhaseValueException:
     {
-        MessageBox(NULL, "Invalid game phase (should be: movement/placement)", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Invalid game phase (should be: movement/placement)", "Error", MB_ICONWARNING);
         exit(3);
     }
     case FileFormatException:
     {
-        MessageBox(NULL, "Invalid file format. Only .txt is supported", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Invalid file format. Only .txt is supported", "Error", MB_ICONWARNING);
         exit(3);
     }
     case FileOpenException:
     {
-        MessageBox(NULL, "Error while opening the file. Please provide a valid path (relative to the .exe file)", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Error while opening the file. Please provide a valid path (relative to the .exe file)", "Error", MB_ICONWARNING);
         exit(3);
     }
     case MoveImpossible:
     {
-        MessageBox(NULL, "Impossible to make a move for current phase", "Error", MB_ICONWARNING);
+        // MessageBox(NULL, "Impossible to make a move for current phase", "Error", MB_ICONWARNING);
         exit(3);
     }
     }
@@ -208,8 +208,8 @@ enum ExceptionHandler setup(struct GameSystem *game, int argc, char *argv[])
         char *msg = (char *)malloc(msgSize);
         snprintf(msg, msgSize, "Player's name: %s", playerName);
 
-        MessageBox(NULL, msg, "Information", MB_ICONINFORMATION);
-        free(msg);
+        // MessageBox(NULL, msg, "Information", MB_ICONINFORMATION);
+        // free(msg);
 
         exit(0);
 
